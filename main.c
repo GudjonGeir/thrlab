@@ -11,12 +11,14 @@
  * provide your team information in below.
  *
  * === User information ===
- * User 1: 
- * SSN:
- * User 2:
- * SSN:
+ * User 1: gudjonj13
+ * SSN: 090391-2089
+ * User 2: solveigsg12
+ * SSN: 010291-2169
  * === End User Information ===
  ********************************************************/
+
+static void *barber_work(void *arg);
 
 struct chairs
 {
@@ -27,8 +29,6 @@ struct chairs
 	sem_t mutex;					/* Protects accesses to customer */
 	sem_t free_chairs;				/* Counts available chairs */
 	sem_t occupied_chairs;			/* Counts available customers for cutting */
-    /* TODO: Add more variables related to threads */
-    /* Hint: Think of the consumer producer thread problem */
 };
 
 struct barber
@@ -44,26 +44,6 @@ struct simulator
     pthread_t *barberThread;
     struct barber **barber;
 };
-
-static void *barber_work(void *arg)
-{
-    struct barber *barber = arg;
-    struct chairs *chairs = &barber->simulator->chairs;
-    struct customer *customer = 0; /* TODO: Fetch a customer from a chair */
-
-    /* Main barber loop */
-    while (true) {
-		sem_wait(&chairs->occupied_chairs);
-		sem_wait(&chairs->mutex);
-		customer = chairs->customer[(++chairs->front) % (chairs->max)];
-		sem_post(&chairs->mutex);
-		sem_post(&chairs->free_chairs);
-		thrlab_prepare_customer(customer, barber->room);
-        thrlab_sleep(5 * (customer->hair_length - customer->hair_goal));
-        thrlab_dismiss_customer(customer, barber->room);
-    }
-    return NULL;
-}
 
 /**
  * Initialize data structures and create waiting barber threads.
@@ -120,21 +100,47 @@ static void customer_arrived(struct customer *customer, void *arg)
 
     sem_init(&customer->mutex, 0, 0);
 
-	// sem_getvalue(sem_t *sem, int *sval);
-	// if(chairs->free_chairs > 0)
+	int free_chairs;
+	sem_getvalue(&chairs->free_chairs, &free_chairs);
+	if(free_chairs > 0)
 	{
 		sem_wait(&chairs->free_chairs);
 		sem_wait(&chairs->mutex);
-		// TODO: create customer thread and wait
 		thrlab_accept_customer(customer);
 		chairs->customer[(++chairs->rear) % chairs->max] = customer;
 		sem_post(&chairs->mutex);
 		sem_post(&chairs->occupied_chairs);
+
+		/* Customer waits until hair is cut */
+		sem_wait(&customer->mutex);
 	}
-	// else
+	else
 	{
 		thrlab_reject_customer(customer);
 	}
+}
+
+static void *barber_work(void *arg)
+{
+    struct barber *barber = arg;
+    struct chairs *chairs = &barber->simulator->chairs;
+    struct customer *customer;
+
+    /* Main barber loop */
+    while (true) {
+		sem_wait(&chairs->occupied_chairs);
+		sem_wait(&chairs->mutex);
+		customer = chairs->customer[(++chairs->front) % (chairs->max)];
+		sem_post(&chairs->mutex);
+		sem_post(&chairs->free_chairs);
+		thrlab_prepare_customer(customer, barber->room);
+        thrlab_sleep(5 * (customer->hair_length - customer->hair_goal));
+        thrlab_dismiss_customer(customer, barber->room);
+
+		/* Customer can leave barber shop */
+		sem_post(&customer->mutex);
+    }
+    return NULL;
 }
 
 int main (int argc, char **argv)

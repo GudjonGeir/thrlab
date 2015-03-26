@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "help.h"
+#include <string.h>
+#include <errno.h>
 
 /*********************************************************
  * NOTE TO STUDENTS: Before you do anything else, please
@@ -19,6 +21,72 @@
  ********************************************************/
 
 static void *barber_work(void *arg);
+
+/**
+ * Wrapper functions
+ */
+void Sem_init(sem_t *sem, int pshared, unsigned int value)
+{
+	int ret;
+
+	if((ret = sem_init(sem, pshared, value)) < 0)
+	{
+		fprintf(stderr, "sem_init error: %s", strerror(errno));
+	}
+}
+
+void Sem_wait(sem_t *sem)
+{
+	int ret;
+
+	if((ret = sem_wait(sem)) < 0)
+	{
+		fprintf(stderr, "sem_wait error: %s", strerror(errno));
+	}
+}
+
+void Sem_post(sem_t *sem)
+{
+	int ret;
+
+	if((ret = sem_post(sem)) < 0)
+	{
+		fprintf(stderr, "sem_post error: %s", strerror(errno));
+	}
+}
+
+void Sem_getvalue(sem_t *sem, int *sval)
+{
+	int ret;
+
+	if((ret = sem_getvalue(sem, sval)) < 0)
+	{
+		fprintf(stderr, "sem_getvalue error: %s", strerror(errno));
+	}
+}
+
+void Pthread_create(pthread_t *tid, pthread_attr_t *attr, void * (*routine)(void *), void *arg)
+{
+	int ret;
+
+	if((ret = pthread_create(tid, attr, routine, arg)) < 0)
+	{
+		fprintf(stderr, "pthread_create error: %s", strerror(errno));
+	}
+}
+
+void Pthread_detach(pthread_t tid)
+{
+	int ret;
+
+	if((ret = pthread_detach(tid)) < 0)
+	{
+		fprintf(stderr, "pthread_detach error: %s", strerror(errno));
+	}
+}
+/**
+ * Wrapper functions end
+ */
 
 struct chairs
 {
@@ -54,9 +122,9 @@ static void setup(struct simulator *simulator)
     /* Setup semaphores*/
     chairs->max = thrlab_get_num_chairs();
 	chairs->front = chairs->rear = 0;
-    sem_init(&chairs->mutex, 0, 1);							/* Binary semaphore for locking */
-	sem_init(&chairs->free_chairs, 0, chairs->max);			/* max free chairs */
-	sem_init(&chairs->occupied_chairs, 0,  0);				/* zero occupied chairs */
+    Sem_init(&chairs->mutex, 0, 1);							/* Binary semaphore for locking */
+	Sem_init(&chairs->free_chairs, 0, chairs->max);			/* max free chairs */
+	Sem_init(&chairs->occupied_chairs, 0,  0);				/* zero occupied chairs */
 
     /* Create chairs*/
     chairs->customer = malloc(sizeof(struct customer *) * thrlab_get_num_chairs());
@@ -72,8 +140,8 @@ static void setup(struct simulator *simulator)
 		barber->room = i;
 		barber->simulator = simulator;
 		simulator->barber[i] = barber;
-		pthread_create(&simulator->barberThread[i], 0, barber_work, barber);
-		pthread_detach(simulator->barberThread[i]);
+		Pthread_create(&simulator->barberThread[i], 0, barber_work, barber);
+		Pthread_detach(simulator->barberThread[i]);
     }
 }
 
@@ -98,25 +166,30 @@ static void customer_arrived(struct customer *customer, void *arg)
     struct simulator *simulator = arg;
     struct chairs *chairs = &simulator->chairs;
 
-    sem_init(&customer->mutex, 0, 0);
+    Sem_init(&customer->mutex, 0, 0);
 
+	/**
+	 * Get the int value of free_chairs semaphore, if there are free chairs
+	 * accept the customer, else reject him/her
+	 */
+	Sem_wait(&chairs->mutex);  /* Only one customer can check for free chairs at a time */
 	int free_chairs;
-	sem_getvalue(&chairs->free_chairs, &free_chairs);
+	Sem_getvalue(&chairs->free_chairs, &free_chairs);
 	if(free_chairs > 0)
 	{
-		sem_wait(&chairs->free_chairs);
-		sem_wait(&chairs->mutex);
+		Sem_wait(&chairs->free_chairs);
 		thrlab_accept_customer(customer);
 		chairs->customer[(++chairs->rear) % chairs->max] = customer;
-		sem_post(&chairs->mutex);
-		sem_post(&chairs->occupied_chairs);
+		Sem_post(&chairs->mutex);
+		Sem_post(&chairs->occupied_chairs);
 
 		/* Customer waits until hair is cut */
-		sem_wait(&customer->mutex);
+		Sem_wait(&customer->mutex);
 	}
 	else
 	{
 		thrlab_reject_customer(customer);
+		Sem_post(&chairs->mutex);
 	}
 }
 
@@ -128,17 +201,17 @@ static void *barber_work(void *arg)
 
     /* Main barber loop */
     while (true) {
-		sem_wait(&chairs->occupied_chairs);
-		sem_wait(&chairs->mutex);
-		customer = chairs->customer[(++chairs->front) % (chairs->max)];
-		sem_post(&chairs->mutex);
-		sem_post(&chairs->free_chairs);
+		Sem_wait(&chairs->occupied_chairs);			/* Barber thread waits for customers */
+		Sem_wait(&chairs->mutex);
+		customer = chairs->customer[(++chairs->front) % (chairs->max)]; /* Get next customer in line */
+		Sem_post(&chairs->mutex);
+		Sem_post(&chairs->free_chairs);				/* Open up a chair */
 		thrlab_prepare_customer(customer, barber->room);
         thrlab_sleep(5 * (customer->hair_length - customer->hair_goal));
         thrlab_dismiss_customer(customer, barber->room);
 
 		/* Customer can leave barber shop */
-		sem_post(&customer->mutex);
+		Sem_post(&customer->mutex);
     }
     return NULL;
 }
